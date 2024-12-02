@@ -4,33 +4,44 @@ import (
 	myhttp "crud-app/internal/delivery/http"
 	"crud-app/internal/repository"
 	"crud-app/internal/usecase"
-	"log"
+	"database/sql"
+	"log/slog"
 	"net/http"
 
-	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 )
 
 func main() {
-	// Подключение к базе данных
-	db, err := sqlx.Connect("postgres", "user=postgres password=1234 dbname=crud-app sslmode=disable")
+	// Настройки подключения к базе данных
+	connStr := "user=postgres password=1234 dbname=crud-app sslmode=disable"
+	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Failed to connect to the database", slog.String("error", err.Error()))
+		return
+	}
+	defer db.Close()
+
+	// Проверяем подключение
+	if err := db.Ping(); err != nil {
+		slog.Error("Failed to ping the database", slog.String("error", err.Error()))
+		return
 	}
 
-	// Инициализация слоёв приложения
+	// Инициализируем зависимости
 	repo := repository.NewRequestRepository(db)
-	usecase := usecase.NewRequestUsecase(repo)
-	handler := myhttp.NewHandler(usecase)
+	uc := usecase.NewRequestUsecase(repo)
+	handler := myhttp.NewHandler(uc)
 
-	// Настройка маршрутов
+	// Настраиваем маршруты
 	http.HandleFunc("/", handler.Index)
 	http.HandleFunc("/requests", handler.GetRequestsWithPagination)
 	http.HandleFunc("/requests/create", handler.CreateRequestPage)
-	http.HandleFunc("/requests/create/submit", handler.CreateRequest)
+	http.HandleFunc("/create-request", handler.CreateRequest)
 	http.HandleFunc("/requests/delete", handler.DeleteRequest)
 
-	// Запуск сервера
-	log.Println("Server is running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Запускаем сервер
+	slog.Info("Starting server on :8080...")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		slog.Error("Failed to start server", slog.String("error", err.Error()))
+	}
 }

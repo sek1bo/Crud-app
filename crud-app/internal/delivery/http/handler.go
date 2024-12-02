@@ -3,8 +3,8 @@ package myhttp
 import (
 	"crud-app/internal/entity"
 	"crud-app/internal/usecase"
-	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"strconv"
 )
@@ -50,44 +50,33 @@ func (h *Handler) CreateRequestPage(w http.ResponseWriter, r *http.Request) {
 // Создание заявки (обработка формы)
 func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		// Получаем данные из формы
 		title := r.FormValue("title")
 		content := r.FormValue("content")
 
-		// Логируем полученные данные
-		fmt.Println("Received Title:", title)
-		fmt.Println("Received Content:", content)
-
-		// Проверяем, что данные были переданы
 		if title == "" || content == "" {
+			slog.Warn("Title or content missing in request")
 			http.Error(w, "Title and content are required", http.StatusBadRequest)
 			return
 		}
 
-		// Создаем объект заявки
 		request := entity.Request{
 			Title:   title,
 			Content: content,
-			Status:  "Новая", // Статус по умолчанию
+			Status:  "Новая",
 		}
 
-		// Логируем объект заявки
-		fmt.Println("Request object:", request)
-
-		// Сохраняем заявку в базе данных
 		if err := h.usecase.CreateRequest(&request); err != nil {
-			// Логируем ошибку
-			fmt.Println("Error saving request:", err)
+			slog.Error("Failed to create request", slog.String("error", err.Error()))
 			http.Error(w, "Failed to create request", http.StatusInternalServerError)
 			return
 		}
 
-		// После успешного создания редиректим на страницу заявок
+		slog.Info("Request created successfully", slog.String("title", title))
 		http.Redirect(w, r, "/requests", http.StatusSeeOther)
 		return
 	}
 
-	// Если не POST, ошибка
+	slog.Warn("Invalid request method")
 	http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 }
 

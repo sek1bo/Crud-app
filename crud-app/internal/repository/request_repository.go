@@ -2,39 +2,92 @@ package repository
 
 import (
 	"crud-app/internal/entity"
+	"database/sql"
 	"fmt"
-
-	"github.com/jmoiron/sqlx"
+	"log/slog"
 )
 
 type RequestRepository struct {
-	db *sqlx.DB
+	db *sql.DB
 }
 
-func NewRequestRepository(db *sqlx.DB) *RequestRepository {
+func NewRequestRepository(db *sql.DB) *RequestRepository {
 	return &RequestRepository{db: db}
 }
 
+// Создание новой заявки с использованием транзакции
 func (r *RequestRepository) CreateRequest(request *entity.Request) error {
-	// Логируем данные перед вставкой
-	fmt.Println("Inserting request into database:", request)
-
-	_, err := r.db.Exec("INSERT INTO requests (title, content, status) VALUES ($1, $2, $3)", request.Title, request.Content, request.Status)
+	tx, err := r.db.Begin()
 	if err != nil {
-		// Логируем ошибку при вставке
-		fmt.Println("Error inserting request:", err)
-		return err
+		slog.Error("Failed to begin transaction", slog.String("error", err.Error()))
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+
+	_, err = tx.Exec("INSERT INTO requests (title, content, status) VALUES ($1, $2, $3)", request.Title, request.Content, request.Status)
+	if err != nil {
+		slog.Error("Failed to insert request", slog.String("error", err.Error()))
+		tx.Rollback()
+		return fmt.Errorf("failed to insert request: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		slog.Error("Failed to commit transaction", slog.String("error", err.Error()))
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	slog.Info("Request created successfully", slog.String("title", request.Title))
 	return nil
 }
 
-func (r *RequestRepository) GetRequestsWithPagination(offset, limit int) ([]entity.Request, error) {
-	var requests []entity.Request
-	err := r.db.Select(&requests, "SELECT * FROM requests LIMIT $1 OFFSET $2", limit, offset)
-	return requests, err
+// Удаление заявки
+func (r *RequestRepository) DeleteRequest(id int) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		slog.Error("Failed to begin transaction", slog.String("error", err.Error()))
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	_, err = tx.Exec("DELETE FROM requests WHERE id = $1", id)
+	if err != nil {
+		slog.Error("Failed to delete request", slog.String("error", err.Error()))
+		tx.Rollback()
+		return fmt.Errorf("failed to delete request: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		slog.Error("Failed to commit transaction", slog.String("error", err.Error()))
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	slog.Info("Request deleted successfully", slog.Int("id", id))
+	return nil
 }
 
-func (r *RequestRepository) DeleteRequest(id int) error {
-	_, err := r.db.Exec("DELETE FROM requests WHERE id = $1", id)
-	return err
+// Получение заявок с сортировкой
+func (r *RequestRepository) GetRequestsWithPagination(offset, limit int) ([]entity.Request, error) {
+	query := `
+		SELECT id, title, content, status 
+		FROM requests 
+		ORDER BY id DESC
+		LIMIT $1 OFFSET $2`
+
+	rows, err := r.db.Query(query, limit, offset)
+	if err != nil {
+		slog.Error("Failed to retrieve requests", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("failed to retrieve requests: %w", err)
+	}
+	defer rows.Close()
+
+	var requests []entity.Request
+	for rows.Next() {
+		var request entity.Request
+		if err := rows.Scan(&request.ID, &request.Title, &request.Content, &request.Status); err != nil {
+			slog.Error("Failed to scan request", slog.String("error", err.Error()))
+			return nil, fmt.Errorf("failed to scan request: %w", err)
+		}
+		requests = append(requests, request)
+	}
+
+	slog.Info("Requests retrieved successfully", slog.Int("count", len(requests)))
+	return requests, nil
 }
